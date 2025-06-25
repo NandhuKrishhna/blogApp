@@ -5,7 +5,9 @@ import { UserModel } from "../models/user.model";
 import appAssert from "../utils/appAssert";
 import { ONE_DAY_MS, oneYearFromNow, thirtyDaysFromNow } from "../utils/date";
 import { AccessTokenPayload, RefreshTokenPayload, refreshTokenSignOptions, signToken, verifyToken } from "../utils/jwt";
-
+import { PrismaClient } from "@prisma/client";
+import { hashPassword } from "../utils/bcrypt";
+const prisma = new PrismaClient();
 
 //TODO move types to types.ts
 export type CreateAccountParams = {
@@ -19,21 +21,23 @@ export type LoginAccountParams = {
     password: string
 }
 export const createAccount = async (data: CreateAccountParams) => {
-    const existingUser = await UserModel.exists({
-        email: data.email,
-    });
+    const existingUser = await prisma.user.findUnique({ where: { email: data.email } })
     appAssert(!existingUser, CONFLICT, "Email already in use");
-    const user = await UserModel.create({
-        name: data.name,
-        email: data.email,
-        password: data.password,
-        profilePicture: data.profilePicture
-
-    });
-    const session = await SessionModel.create({
-        userId: user._id,
-        expiresAt: oneYearFromNow()
-    });
+    const hashedPassword = await hashPassword(data.password)
+    const user = await prisma.user.create({
+        data: {
+            name: data.name,
+            email: data.email,
+            password: hashedPassword,
+            profilePicture: data.profilePicture
+        }
+    })
+    const session = await prisma.session.create({
+        data: {
+            userId: user.id,
+            expiresAt: thirtyDaysFromNow(),
+        }
+    })
     const refreshToken = signToken(
         {
             sessionId: session._id,
@@ -43,9 +47,10 @@ export const createAccount = async (data: CreateAccountParams) => {
     const accessToken = signToken({
         userId: user._id as mongoose.Types.ObjectId,
         sessionId: session._id,
+
     });
     return {
-        user: user.omitPassword(),
+        user,
         accessToken,
         refreshToken,
     };
@@ -54,7 +59,7 @@ export const createAccount = async (data: CreateAccountParams) => {
 }
 
 export const loginUser = async (data: LoginAccountParams) => {
-    const user = await UserModel.findOne({ email: data.email });
+    const user = await prisma.user.findUnique({ where: { email: data.email } });
     appAssert(user, UNAUTHORIZED, "Invalid email or password");
     const isValid = await user.comparePassword(data.password);
     appAssert(isValid, UNAUTHORIZED, "Invalid email or password");
@@ -73,7 +78,7 @@ export const loginUser = async (data: LoginAccountParams) => {
         userId,
     });
     return {
-        user: user.omitPassword(),
+        user,
         accessToken,
         refreshToken,
     };
@@ -86,7 +91,11 @@ export const setRefreshToken = async (refreshToken: string) => {
         secret: refreshTokenSignOptions.secret,
     });
     appAssert(payload, UNAUTHORIZED, "Invalid refresh token");
-    const session = await SessionModel.findById(payload.sessionId);
+    const session = await prisma.session.findUnique({
+        where: {
+            _id: payload.sessionId,
+        },
+    });
     const now = Date.now();
     appAssert(
         session && session.expiresAt.getTime() > now,
@@ -121,5 +130,9 @@ export const setRefreshToken = async (refreshToken: string) => {
 
 
 export const logoutUser = async (payload: AccessTokenPayload) => {
-    await SessionModel.findByIdAndDelete(payload.sessionId);
+    await prisma.session.deleteMany({
+        where: {
+            id: payload.sessionId,
+        }
+    })
 };

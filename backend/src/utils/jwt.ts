@@ -7,6 +7,7 @@ import { JWT_REFRESH_SECRET, JWT_SECRET } from "../constants/env";
 export type AccessTokenPayload = {
   userId: mongoose.Types.ObjectId;
   sessionId: mongoose.Types.ObjectId;
+
 };
 
 export type RefreshTokenPayload = {

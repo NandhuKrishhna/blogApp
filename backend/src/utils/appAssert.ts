@@ -18,5 +18,4 @@ const appAssert: AppAssert = (
     message,
     appErrorCode
 ) => assert(condition, new AppError(httpsStatusCode, message, appErrorCode));
-
 export default appAssert;
